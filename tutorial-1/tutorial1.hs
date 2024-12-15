@@ -180,7 +180,7 @@ prop_totalScore_positive xs = totalScore xs >= 1
 -- List-comprehension version
 crosswordFind :: Char -> Int -> Int -> [String] -> [String]
 crosswordFind letter pos len words = [ w | w <- words, length w == len && w !! pos == letter ]
-
+:
 
 -- 9. search
 

@@ -9,7 +9,11 @@ import Data.Char
 import Test.QuickCheck
 import Data.List (nub, transpose, intercalate)
 
-
+import qualified Data.Vector as V
+import Data.Vector (Vector)
+import System.Random (StdGen, randomR, mkStdGen, split)
+import Control.Monad (replicateM)
+import Text.Printf (printf)
 
 -- 1. Map
 -- a.
@@ -20,7 +24,7 @@ uppers = map toUpper
 doubles :: [Int] -> [Int]
 doubles = map (*2)
 
--- c.        
+-- c.
 penceToPounds :: [Int] -> [Float]
 penceToPounds = map (\x -> fromIntegral x / 100)
 
@@ -90,7 +94,7 @@ largeDoubles' :: [Int] -> [Int]
 largeDoubles' = map (*2) . filter (>3)
 
 prop_largeDoubles :: [Int] -> Bool
-prop_largeDoubles xs = largeDoubles xs == largeDoubles' xs 
+prop_largeDoubles xs = largeDoubles xs == largeDoubles' xs
 
 -- c.
 reverseEven :: [String] -> [String]
@@ -125,7 +129,7 @@ andFold :: [Bool] -> Bool
 andFold = foldr (&&) True
 
 prop_and :: [Bool] -> Bool
-prop_and xs = andRec xs == andFold xs 
+prop_and xs = andRec xs == andFold xs
 
 -- c.
 concatRec :: [[a]] -> [a]
@@ -150,8 +154,8 @@ prop_rmChars :: String -> String -> Bool
 prop_rmChars chars str = rmCharsRec chars str == rmCharsFold chars str
 
 
-type Vector = [Int]
-type Matrix = [Vector]
+type QVector = [Int]
+type Matrix = [QVector]
 
 
 -- 5
@@ -205,7 +209,7 @@ plusM a b
      sameSize     = map length a == map length b
 
 -- 8.
-dot :: Vector -> Vector -> Int
+dot :: QVector -> QVector -> Int
 dot u v = sum $ zipWith (*) u v
 
 shape :: Matrix -> (Int, Int)
@@ -247,6 +251,27 @@ timesM' a b
 
       b'  = transpose b
       c   = [ [ dot' x y | y <- b' ] | x <- a ]
+
+
+--mult :: DMatrix -> DMatrix -> Maybe DMatrix
+--mult a b
+--  | valid     = Just ab
+--  | otherwise = Nothing
+--    where
+--      (m,  n) = shape' a
+--      (n', r) = shape' b
+--
+--      valid   = n == n
+--
+--      ab      = mult' a b (zero m r)
+--
+--      mult' a' b' z = map
+
+scalarMult :: Double -> DVector -> DVector
+scalarMult c a = [ c * a_i | a_i <- a ]
+
+zero :: Int -> Int -> DMatrix
+zero m r = [ [ 0 | j <- [0..r - 1] ] | i <- [0..m - 1] ]
 
 
 mat :: Int -> Int -> DMatrix
@@ -334,3 +359,137 @@ prop_inverse = forAll squareMatrixGen $ \a ->
     tol     = 1e-9
   in
     det a /= 0 ==> approxEqualMatrices tol b (identity n)
+
+
+
+type VMatrix a = Vector (Vector a)
+
+-- Create a matrix from a list of lists
+fromList :: [[a]] -> VMatrix a
+fromList = V.fromList . map V.fromList
+
+-- Get the number of rows in a matrix
+numRows :: VMatrix a -> Int
+numRows = V.length
+
+-- Get the number of columns in a matrix
+numCols :: VMatrix a -> Int
+numCols m
+  | V.null m  = 0
+  | otherwise = V.length (V.head m)
+
+-- Get the shape of a matrix
+shape'' :: VMatrix a -> (Int, Int)
+shape'' m = (numRows m, numCols m)
+
+-- Multiply two matrices
+multiply :: Num a => VMatrix a -> VMatrix a -> Maybe (VMatrix a)
+multiply a b
+  | n == n'   = Just $ V.generate m $ \i ->
+                  V.generate r $ \j ->
+                    let
+                      rowA = a V.! i
+                    in
+                      V.sum $ V.imap (\k x -> x * (b V.! k V.! j)) rowA
+  | otherwise = Nothing
+  where
+    (m,  n)  = shape'' a
+    (n', r)  = shape'' b
+
+-- Define an infix operator for matrix multiplication
+infixl 7 .*.
+
+(.*.) :: Num a => VMatrix a -> VMatrix a -> Maybe (VMatrix a)
+(.*.) = multiply
+
+-- Generate a random double with a given generator
+randomDouble :: StdGen -> (Double, StdGen)
+randomDouble gen = randomR (0.0, 1.0) gen
+
+-- Generate a vector of random doubles of given length
+randomVectorPure :: Int -> StdGen -> (Vector Double, StdGen)
+randomVectorPure n gen = go n gen V.empty
+  where
+    go 0 g acc = (acc, g)
+    go k g acc =
+        let (val, newGen) = randomDouble g
+        in go (k-1) newGen (V.snoc acc val)
+
+-- Generate a random matrix of given dimensions
+randomMatrix :: Int -> Int -> StdGen -> (VMatrix Double, StdGen)
+randomMatrix rows cols gen = go rows gen V.empty
+  where
+    go 0 g acc = (acc, g)
+    go r g acc =
+        let (vec, newGen) = randomVectorPure cols g
+        in go (r-1) newGen (V.snoc acc vec)
+
+-- Linear layer type
+data Linear = Linear { weights :: VMatrix Double, biases :: Vector Double }
+
+-- Neural network type
+data NeuralNet = NeuralNet { layers :: [Layer] }
+
+-- Layer type to hold different types of layers
+data Layer = LLinear Linear | LReLU
+
+-- Create a random linear layer
+randomLinear :: Int -> Int -> StdGen -> (Linear, StdGen)
+randomLinear inFeatures outFeatures gen =
+  let (weightMatrix, gen') = randomMatrix outFeatures inFeatures gen
+      (biasVector, gen'') = randomVectorPure outFeatures gen'
+  in (Linear weightMatrix biasVector, gen'')
+
+-- Forward pass for a linear layer
+linearForward :: Linear -> VMatrix Double -> Maybe (VMatrix Double)
+linearForward (Linear w b) x = do
+  wx <- w .*. x
+  let wxb = V.map (\row -> V.zipWith (+) row b) wx
+  return wxb
+
+-- ReLU activation function
+relu :: VMatrix Double -> VMatrix Double
+relu = V.map (V.map (\x -> if x > 0 then x else 0))
+
+
+
+-- Forward pass for the neural network
+forward :: NeuralNet -> VMatrix Double -> Maybe (VMatrix Double)
+forward (NeuralNet []) x = Just x
+forward (NeuralNet (LLinear l : ls)) x = do
+  out <- linearForward l x
+  forward (NeuralNet ls) out
+forward (NeuralNet (LReLU : ls)) x =
+  forward (NeuralNet ls) (relu x)
+
+-- Function to generate a random architecture
+randomArchitecture :: Int -> Int -> Int -> StdGen -> (NeuralNet, StdGen)
+randomArchitecture inputDim outputDim maxLayers gen = go maxLayers inputDim gen []
+  where
+    go 0 inDim g acc = let (finalLayer, newGen) = randomLinear inDim outputDim g
+                       in (NeuralNet (acc ++ [LLinear finalLayer]), newGen)
+    go n inDim g acc =
+        let (layerType, g') = randomR (0 :: Int, 1 :: Int) g
+            (layer, outDim, g'') = case layerType of
+                0 -> let outDim = max 1 (inDim + 1) -- Ensure outDim is positive
+                         (linLayer, g'') = randomLinear inDim outDim g'
+                     in (LLinear linLayer, outDim, g'')
+                _ -> (LReLU, inDim, g')
+        in go (n-1) outDim g'' (acc ++ [layer])
+
+-- Show instance for Linear
+instance Show Linear where
+    show (Linear w b) =
+        let (numRows, numCols) = shape'' w
+        in printf "Linear(in_features=%d, out_features=%d, bias=%s)" numCols numRows (show (V.length b > 0))
+
+-- Show instance for Layer
+instance Show Layer where
+    show (LLinear l) = show l
+    show LReLU = "ReLU()"
+
+-- Show instance for NeuralNet
+instance Show NeuralNet where
+    show (NeuralNet layers) =
+        let layerStrs = zipWith (\(i :: Int) layer -> printf "Layer %d: %s" i (show layer)) [1..] layers
+        in "Neural Network:\n" ++ unlines layerStrs

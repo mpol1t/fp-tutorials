@@ -1,0 +1,4 @@
+
+:set -package OpenGL
+:set -package random
+:l tutorial6.hs

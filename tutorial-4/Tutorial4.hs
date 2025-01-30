@@ -3,33 +3,7 @@
 --
 -- Due: the tutorial of week 6 (26/27 Oct)
 
-module Tutorial4
-    ( sameString
-    , prefix
-    , contains
-    , takeUntil
-    , dropUntil
-    , split
-    , reconstruct
-    , extract
-    , extractAll
-    , linksFromHTML
-    , takeEmails
-    , link2pair
-    , emailsFromHTML
-    , findEmail
-    , emailsByNameFromHTML
-    , hasInitials
-    , emailsByMatchFromHTML
-    , emailsByInitialsFromHTML
-    , emailsByMyCriteriaFromHTML
-    , ppAddrBook
-    , testURL
-    , getURL
-    , Link
-    , Name
-    , Email
-    ) where
+module Tutorial4 where
 
 import Data.List (nub, intercalate)
 import Data.Maybe (fromMaybe)
@@ -38,7 +12,12 @@ import Test.QuickCheck
 import Network.HTTP.Conduit (simpleHttp)
 import Fixtures
 import qualified Data.ByteString.Lazy.Char8 as L8
-import Types
+
+type Link   = String
+type Name   = String
+type Email  = String
+type HTML   = String
+type URL    = String
 
 getURL :: String -> IO String
 getURL url = do
@@ -194,3 +173,35 @@ ppAddrBook addr =
         justify n s = s ++ replicate (n - length s) ' '
     in
         unlines [justify nameWidth name ++ "   " ++ email | (name, email) <- addr]
+
+
+prop_sameString_pos :: String -> Bool
+prop_sameString_pos a = sameString a a
+
+prop_sameString_neg :: String -> String -> Property
+prop_sameString_neg a b = a /= b ==> not $ sameString a b
+
+prop_prefix_pos :: String -> Int -> Bool
+prop_prefix_pos str n =  prefix substr (map toLower str) && prefix substr (map toUpper str)
+  where substr = take n str
+
+prop_prefix_neg :: String -> Int -> Bool
+prop_prefix_neg str n = sameString str substr || (not $ prefix str substr)
+                          where substr = take n str
+
+prop_contains_pos :: String -> String -> Bool
+prop_contains_pos a b = contains (a ++ b) b
+
+prop_split :: Char -> String -> String -> Bool
+prop_split c sep str =
+    let
+        Just x = split sep' str
+        sep' = c : sep
+    in
+        reconstruct sep' x `sameString` str
+
+testLinksFromHTML :: Bool
+testLinksFromHTML = linksFromHTML testHTML == testLinks
+
+testEmailsFromHTML :: Bool
+testEmailsFromHTML = emailsFromHTML testHTML == testAddrBook

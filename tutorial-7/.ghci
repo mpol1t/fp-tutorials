@@ -1,0 +1,2 @@
+:set -package random
+:l tutorial7.hs
